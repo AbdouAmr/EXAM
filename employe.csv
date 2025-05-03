@@ -1,0 +1,21 @@
+id,nom,prénom,date_naissance,date_embauche,grade,salaire,nomDepartement
+1,Clément,Marguerite,1966-04-24,2015-09-29,Manager,4630.65,Ressources Humaines
+2,Pages,Lorraine,1981-02-06,2025-01-29,Manager,6342.53,Production
+3,Roche,Édouard,1998-12-20,2015-06-24,Junior,5993.64,Ressources Humaines
+4,Lebrun,Andrée,1980-01-30,2023-12-09,Junior,3230.37,Informatique
+5,Martineau,Théophile,1987-05-28,2024-11-07,Chef de projet,6687.96,Informatique
+6,Valette,Audrey,1965-02-15,2022-04-06,Junior,4960.67,Ressources Humaines
+7,Mace,Marthe,1966-07-09,2025-04-07,Chef de projet,4623.52,Ressources Humaines
+8,Blot,Jeanne,1986-01-25,2019-05-27,Senior,6286.52,Ressources Humaines
+9,Gallet,Danielle,1973-07-11,2015-11-21,Confirmé,4887.8,Marketing
+10,Schmitt,Laurence,1998-08-21,2017-01-26,Confirmé,6968.96,Finance
+11,Potier,Noémi,1997-08-07,2020-04-17,Senior,6149.55,Informatique
+12,Benoit,Audrey,1992-01-24,2023-05-17,Chef de projet,6285.32,Finance
+13,Roy,Hélène,1988-01-18,2018-05-15,Chef de projet,2815.97,Ressources Humaines
+14,Gay,Élise,1998-07-13,2016-12-22,Manager,4693.81,Marketing
+15,De Oliveira,Colette,1983-04-04,2018-04-05,Manager,2770.3,Informatique
+16,Chevalier,Vincent,1987-12-04,2018-11-05,Confirmé,5516.75,Marketing
+17,Laurent,Martin,2001-09-04,2015-11-17,Junior,3439.68,Production
+18,Guillot,Océane,1968-12-12,2016-12-27,Junior,4804.56,Informatique
+19,Gomes,Marcel,1979-11-07,2021-03-27,Junior,2580.31,Marketing
+20,Lefebvre,Margaud,1985-06-14,2021-12-02,Confirmé,2928.09,Finance

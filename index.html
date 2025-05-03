@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <title>Tableau de bord RH - Employés</title>
+  <!-- Lien vers une version récente de Plotly -->
+  <script src="https://cdn.plot.ly/plotly-2.20.0.min.js"></script>
+  <!-- Lien vers une version correcte de SheetJS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Tableau de bord RH - Employés</h1>
+  <input type="file" id="input-excel" />
+  
+  <div>
+    <label for="select-service">Choisir un service :</label>
+    <select id="select-service">
+      <option value="">Tous</option>
+    </select>
+  </div>
+
+  <!-- Conteneurs pour les graphiques -->
+  <div id="graph-annees" style="height: 400px;"></div>
+  <div id="graph-services" style="height: 400px;"></div>
+  <div id="graph-salaires" style="height: 400px;"></div>
+
+  <script src="main.js"></script>
+</body>
+</html>
