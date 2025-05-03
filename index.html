@@ -1,29 +1,645 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <title>Tableau de bord RH - Employés</title>
-  <!-- Lien vers une version récente de Plotly -->
-  <script src="https://cdn.plot.ly/plotly-2.20.0.min.js"></script>
-  <!-- Lien vers une version correcte de SheetJS -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <meta charset="UTF-8" />
+    <title>Tableau de bord des tâches des employés</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.24.2/plotly.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .file-inputs {
+            margin-bottom: 20px;
+        }
+        .file-inputs label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        .year-selector {
+            margin-bottom: 20px;
+        }
+        .graph-container {
+            margin-bottom: 30px;
+        }
+        .status {
+            color: #d9534f;
+            margin-bottom: 20px;
+        }
+    </style>
 </head>
 <body>
-  <h1>Tableau de bord RH - Employés</h1>
-  <input type="file" id="input-excel" />
-  
-  <div>
-    <label for="select-service">Choisir un service :</label>
-    <select id="select-service">
-      <option value="">Tous</option>
-    </select>
-  </div>
+    <h1>Tableau de bord des tâches des employés</h1>
+    
+    <!-- Statut du chargement -->
+    <div id="status" class="status"></div>
 
-  <!-- Conteneurs pour les graphiques -->
-  <div id="graph-annees" style="height: 400px;"></div>
-  <div id="graph-services" style="height: 400px;"></div>
-  <div id="graph-salaires" style="height: 400px;"></div>
+    <!-- Sélection des fichiers -->
+    <div class="file-inputs">
+        <label for="input-employes">Fichier des employés (.xlsx, .xls, .csv):</label>
+        <input type="file" id="input-employes" accept=".xlsx,.xls,.csv" />
+        
+        <label for="input-taches">Fichier des tâches (.xlsx, .xls, .csv):</label>
+        <input type="file" id="input-taches" accept=".xlsx,.xls,.csv" />
+    </div>
 
-  <script src="main.js"></script>
+    <!-- Sélection de l'année -->
+    <div class="year-selector">
+        <label for="select-annee">Choisir une année:</label>
+        <select id="select-annee">
+            <option value="">Toutes</option>
+        </select>
+    </div>
+
+    <!-- Graphiques -->
+    <div id="graph-age-departement" class="graph-container" style="height: 400px;"></div>
+    <div id="graph-taches-departement" class="graph-container" style="height: 400px;"></div>
+    <div id="graph-taches-age" class="graph-container" style="height: 400px;"></div>
+    <div id="graph-taches-annee" class="graph-container" style="height: 400px;"></div>
+
+    <script>
+        let dataEmployes = [];
+        let dataTaches = [];
+        const statusElement = document.getElementById('status');
+
+        // Fonction utilitaire pour traiter différents formats de date
+        function parseDate(dateString) {
+            if (!dateString) return null;
+            
+            // Gérer les dates qui sont déjà des objets Date
+            if (dateString instanceof Date) {
+                return dateString;
+            }
+            
+            // Gérer les valeurs numériques (timestamps Excel ou nombres serialisés)
+            if (typeof dateString === 'number') {
+                // Convertir le nombre Excel en date JavaScript (Excel: jours depuis 1900-01-01)
+                if (dateString < 2958466) { // ~ année 9999 en format Excel
+                    // Excel date (jours depuis 1900-01-01)
+                    const excelEpoch = new Date(1900, 0, 0);
+                    const date = new Date(excelEpoch.getTime() + (dateString - 1) * 24 * 60 * 60 * 1000);
+                    return date;
+                } else {
+                    // Timestamp Unix (millisecondes depuis 1970-01-01)
+                    return new Date(dateString);
+                }
+            }
+            
+            // Convertir en chaîne si ce n'est pas déjà le cas
+            const dateStr = String(dateString).trim();
+            
+            // Format JJ/MM/AAAA ou JJ-MM-AAAA ou JJ.MM.AAAA
+            const dmyMatch = dateStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+            if (dmyMatch) {
+                const day = parseInt(dmyMatch[1], 10);
+                const month = parseInt(dmyMatch[2], 10) - 1; // Mois commence à 0 en JavaScript
+                const year = parseInt(dmyMatch[3], 10);
+                return new Date(year, month, day);
+            }
+            
+            // Format AAAA/MM/JJ ou AAAA-MM-JJ ou AAAA.MM.JJ
+            const ymdMatch = dateStr.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})$/);
+            if (ymdMatch) {
+                const year = parseInt(ymdMatch[1], 10);
+                const month = parseInt(ymdMatch[2], 10) - 1;
+                const day = parseInt(ymdMatch[3], 10);
+                return new Date(year, month, day);
+            }
+            
+            // Essayer le constructeur Date standard
+            const date = new Date(dateStr);
+            if (!isNaN(date.getTime())) {
+                return date;
+            }
+            
+            console.warn(`Format de date non reconnu: ${dateStr}`);
+            return null;
+        }
+
+        // Fonction utilitaire pour calculer l'âge
+        function calculateAge(birthDate) {
+            if (!birthDate) return null;
+            
+            const today = new Date();
+            let age = today.getFullYear() - birthDate.getFullYear();
+            const monthDiff = today.getMonth() - birthDate.getMonth();
+            
+            if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+                age--;
+            }
+            
+            return age;
+        }
+
+                    // Lire le fichier Employés
+        document.getElementById('input-employes').addEventListener('change', function(e) {
+            if (!e.target.files || !e.target.files[0]) {
+                statusElement.textContent = "Aucun fichier d'employés sélectionné";
+                return;
+            }
+
+            statusElement.textContent = "Chargement du fichier des employés...";
+            
+            const file = e.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    let fileData = e.target.result;
+                    let dataEmployesRaw = [];
+                    
+                    // Déterminer si c'est un CSV ou un XLSX
+                    if (file.name.toLowerCase().endsWith('.csv')) {
+                        // Traitement CSV avec PapaParse
+                        const results = Papa.parse(fileData, {
+                            header: true,
+                            dynamicTyping: true,
+                            skipEmptyLines: true
+                        });
+                        dataEmployesRaw = results.data;
+                    } else {
+                        // Traitement XLSX
+                        const data = new Uint8Array(fileData);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheet = workbook.SheetNames[0];
+                        dataEmployesRaw = XLSX.utils.sheet_to_json(workbook.Sheets[sheet]);
+                    }
+                    
+                    // Nettoyer et valider les données
+                    dataEmployes = dataEmployesRaw.filter(emp => emp.id && emp.nomDepartement);
+                    
+                    // Si aucun employé n'a de nomDepartement, vérifier d'autres noms de colonne possibles
+                    if (dataEmployes.length === 0 && dataEmployesRaw.length > 0) {
+                        // Chercher des colonnes alternatives
+                        const firstRow = dataEmployesRaw[0];
+                        const possibleDeptNames = ['nomDepartement', 'departement', 'département', 'nom_departement', 'département', 'service'];
+                        const possibleIdNames = ['id', 'ID', 'Id', 'identifiant', 'numéro', 'numero', 'no'];
+                        
+                        // Trouver les noms de colonnes correspondants
+                        let deptColName = null;
+                        for (const name of possibleDeptNames) {
+                            if (name in firstRow) {
+                                deptColName = name;
+                                break;
+                            }
+                        }
+                        
+                        let idColName = null;
+                        for (const name of possibleIdNames) {
+                            if (name in firstRow) {
+                                idColName = name;
+                                break;
+                            }
+                        }
+                        
+                        // Si on a trouvé des colonnes alternatives, normaliser les données
+                        if (deptColName && idColName) {
+                            dataEmployes = dataEmployesRaw.map(emp => ({
+                                id: emp[idColName],
+                                nomDepartement: emp[deptColName],
+                                date_naissance: emp.date_naissance || emp.date_de_naissance || emp.naissance || emp.birthdate
+                            })).filter(emp => emp.id && emp.nomDepartement);
+                        }
+                    }
+                    
+                    // Convertir les dates de naissance en objets Date
+                    dataEmployes.forEach(emp => {
+                        if (emp.date_naissance) {
+                            emp.date_naissance_obj = parseDate(emp.date_naissance);
+                        }
+                    });
+                    
+                    console.log("Données des employés chargées :", dataEmployes);
+                    statusElement.textContent = `${dataEmployes.length} employés chargés. ${dataTaches.length > 0 ? dataTaches.length + ' tâches chargées.' : 'En attente du fichier des tâches...'}`;
+                    
+                    if (dataTaches.length > 0) {
+                        initialiserTableauDeBord();
+                    }
+                } catch (err) {
+                    console.error("Erreur lors du chargement des données des employés:", err);
+                    statusElement.textContent = "Erreur lors du chargement du fichier des employés: " + err.message;
+                }
+            };
+            
+            reader.onerror = function() {
+                statusElement.textContent = "Erreur lors de la lecture du fichier des employés";
+            };
+            
+            // Choisir le bon mode de lecture selon le type de fichier
+            if (file.name.toLowerCase().endsWith('.csv')) {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // Lire le fichier Tâches
+        document.getElementById('input-taches').addEventListener('change', function(e) {
+            if (!e.target.files || !e.target.files[0]) {
+                statusElement.textContent = "Aucun fichier de tâches sélectionné";
+                return;
+            }
+
+            statusElement.textContent = "Chargement du fichier des tâches...";
+            
+            const file = e.target.files[0];
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                try {
+                    let fileData = e.target.result;
+                    let dataTachesRaw = [];
+                    
+                    // Déterminer si c'est un CSV ou un XLSX
+                    if (file.name.toLowerCase().endsWith('.csv')) {
+                        // Traitement CSV avec PapaParse
+                        const results = Papa.parse(fileData, {
+                            header: true,
+                            dynamicTyping: true,
+                            skipEmptyLines: true
+                        });
+                        dataTachesRaw = results.data;
+                    } else {
+                        // Traitement XLSX
+                        const data = new Uint8Array(fileData);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const sheet = workbook.SheetNames[0];
+                        dataTachesRaw = XLSX.utils.sheet_to_json(workbook.Sheets[sheet]);
+                    }
+                    
+                    // Nettoyer et valider les données
+                    dataTaches = dataTachesRaw.filter(tache => tache.id_employé && tache.date_debut);
+                    
+                    // Si aucune tâche n'a id_employé, vérifier d'autres noms de colonne possibles
+                    if (dataTaches.length === 0 && dataTachesRaw.length > 0) {
+                        // Chercher des colonnes alternatives
+                        const firstRow = dataTachesRaw[0];
+                        const possibleEmpIdNames = ['id_employé', 'id_employe', 'id_emp', 'employe_id', 'employe', 'employé', 'employee'];
+                        const possibleDateNames = ['date_debut', 'date_début', 'date', 'debut', 'début', 'start_date', 'dateDebut'];
+                        const possibleEtatNames = ['état', 'etat', 'status', 'statut'];
+                        
+                        // Trouver les noms de colonnes correspondants
+                        let empIdColName = null;
+                        for (const name of possibleEmpIdNames) {
+                            if (name in firstRow) {
+                                empIdColName = name;
+                                break;
+                            }
+                        }
+                        
+                        let dateColName = null;
+                        for (const name of possibleDateNames) {
+                            if (name in firstRow) {
+                                dateColName = name;
+                                break;
+                            }
+                        }
+                        
+                        let etatColName = null;
+                        for (const name of possibleEtatNames) {
+                            if (name in firstRow) {
+                                etatColName = name;
+                                break;
+                            }
+                        }
+                        
+                        // Si on a trouvé des colonnes alternatives, normaliser les données
+                        if (empIdColName && dateColName) {
+                            dataTaches = dataTachesRaw.map(tache => ({
+                                id_employé: tache[empIdColName],
+                                date_debut: tache[dateColName],
+                                état: tache[etatColName] || 'Non défini'
+                            })).filter(tache => tache.id_employé && tache.date_debut);
+                        }
+                    }
+                    
+                    // Convertir les dates en objets Date
+                    dataTaches.forEach(tache => {
+                        if (tache.date_debut) {
+                            tache.date_debut_obj = parseDate(tache.date_debut);
+                        }
+                    });
+                    
+                    console.log("Données des tâches chargées :", dataTaches);
+                    statusElement.textContent = `${dataTaches.length} tâches chargées. ${dataEmployes.length > 0 ? dataEmployes.length + ' employés chargés.' : 'En attente du fichier des employés...'}`;
+                    
+                    if (dataEmployes.length > 0) {
+                        initialiserTableauDeBord();
+                    }
+                } catch (err) {
+                    console.error("Erreur lors du chargement des données des tâches:", err);
+                    statusElement.textContent = "Erreur lors du chargement du fichier des tâches: " + err.message;
+                }
+            };
+            
+            reader.onerror = function() {
+                statusElement.textContent = "Erreur lors de la lecture du fichier des tâches";
+            };
+            
+            // Choisir le bon mode de lecture selon le type de fichier
+            if (file.name.toLowerCase().endsWith('.csv')) {
+                reader.readAsText(file);
+            } else {
+                reader.readAsArrayBuffer(file);
+            }
+        });
+
+        // Extraire l'âge moyen des employés par département
+        function ageMoyenParDepartement(dataEmployes) {
+            const departements = {};
+            
+            dataEmployes.forEach(emp => {
+                if (!emp.date_naissance_obj) return;
+                
+                const age = calculateAge(emp.date_naissance_obj);
+                if (age === null) return;
+                
+                if (!departements[emp.nomDepartement]) {
+                    departements[emp.nomDepartement] = { totalAge: 0, count: 0 };
+                }
+                departements[emp.nomDepartement].totalAge += age;
+                departements[emp.nomDepartement].count++;
+            });
+
+            const result = {};
+            for (const departement in departements) {
+                if (departements[departement].count > 0) {
+                    result[departement] = departements[departement].totalAge / departements[departement].count;
+                }
+            }
+
+            return result;
+        }
+
+        // Nombre de tâches par département pour une année spécifique
+        function tachesParDepartementEtAnnee(dataTaches, dataEmployes, annee) {
+            const departements = {};
+            
+            dataTaches.forEach(tache => {
+                if (!tache.date_debut_obj) return;
+                
+                const anneeTask = tache.date_debut_obj.getFullYear();
+                
+                // Si une année spécifique est demandée et que ce n'est pas celle de la tâche, on ignore
+                if (annee && anneeTask !== parseInt(annee)) return;
+                
+                const employe = dataEmployes.find(emp => emp.id === tache.id_employé);
+                if (employe && employe.nomDepartement) {
+                    if (!departements[employe.nomDepartement]) {
+                        departements[employe.nomDepartement] = 0;
+                    }
+                    departements[employe.nomDepartement]++;
+                }
+            });
+            
+            return departements;
+        }
+
+        // Répartition des tâches par statut et tranche d'âge
+        function tachesParAgeEtEtat(dataTaches, dataEmployes) {
+            const tranchesAge = { '18-30': {}, '31-40': {}, '41-50': {}, '51+': {} };
+            
+            dataTaches.forEach(tache => {
+                const employe = dataEmployes.find(emp => emp.id === tache.id_employé);
+                if (!employe || !employe.date_naissance_obj) return;
+                
+                const age = calculateAge(employe.date_naissance_obj);
+                if (age === null) return;
+                
+                let tranche;
+                if (age <= 30) tranche = '18-30';
+                else if (age <= 40) tranche = '31-40';
+                else if (age <= 50) tranche = '41-50';
+                else tranche = '51+';
+
+                const etat = tache.état || 'Non défini';
+                
+                if (!tranchesAge[tranche][etat]) {
+                    tranchesAge[tranche][etat] = 0;
+                }
+                tranchesAge[tranche][etat]++;
+            });
+            
+            return tranchesAge;
+        }
+
+        // Nombre de tâches par année et département
+        function tachesParAnneeEtDepartement(dataTaches, dataEmployes) {
+            const resultats = {};
+            
+            dataTaches.forEach(tache => {
+                if (!tache.date_debut_obj) return;
+                
+                const annee = tache.date_debut_obj.getFullYear();
+                const employe = dataEmployes.find(emp => emp.id === tache.id_employé);
+                
+                if (employe && employe.nomDepartement) {
+                    if (!resultats[annee]) {
+                        resultats[annee] = {};
+                    }
+                    if (!resultats[annee][employe.nomDepartement]) {
+                        resultats[annee][employe.nomDepartement] = 0;
+                    }
+                    resultats[annee][employe.nomDepartement]++;
+                }
+            });
+            
+            return resultats;
+        }
+
+        // Graphique de l'âge moyen des employés par département
+        function afficherAgeParDepartement(data) {
+            if (data.length === 0) {
+                document.getElementById('graph-age-departement').innerHTML = "<p>Pas de données d'employés disponibles</p>";
+                return;
+            }
+            
+            const departements = ageMoyenParDepartement(data);
+            
+            // Vérifier s'il y a des données
+            if (Object.keys(departements).length === 0) {
+                document.getElementById('graph-age-departement').innerHTML = "<p>Impossible de calculer l'âge moyen. Vérifiez que vos données d'employés contiennent des dates de naissance valides.</p>";
+                return;
+            }
+            
+            const departementsSorted = Object.entries(departements)
+                .sort((a, b) => b[1] - a[1])
+                .reduce((acc, [key, value]) => {
+                    acc[key] = value;
+                    return acc;
+                }, {});
+            
+            try {
+                Plotly.newPlot('graph-age-departement', [{
+                    x: Object.keys(departementsSorted),
+                    y: Object.values(departementsSorted),
+                    type: 'bar',
+                    name: 'Âge moyen des employés',
+                    marker: {
+                        color: 'rgba(55, 128, 191, 0.7)'
+                    }
+                }], {
+                    title: 'Âge moyen des employés par département',
+                    xaxis: { title: 'Département' },
+                    yaxis: { title: 'Âge moyen' }
+                });
+                
+                console.log("Graphique âge moyen créé avec succès");
+            } catch (err) {
+                console.error("Erreur lors de la création du graphique d'âge moyen:", err);
+                document.getElementById('graph-age-departement').innerHTML = "<p>Erreur lors de la création du graphique: " + err.message + "</p>";
+            }
+        }
+
+        // Graphique du nombre de tâches par département pour une année spécifique
+        function afficherTachesParDepartement(dataTaches, dataEmployes, annee) {
+            if (dataTaches.length === 0 || dataEmployes.length === 0) {
+                document.getElementById('graph-taches-departement').innerHTML = "<p>Données insuffisantes pour afficher ce graphique</p>";
+                return;
+            }
+            
+            const departements = tachesParDepartementEtAnnee(dataTaches, dataEmployes, annee);
+            const departementsSorted = Object.entries(departements)
+                .sort((a, b) => b[1] - a[1])
+                .reduce((acc, [key, value]) => {
+                    acc[key] = value;
+                    return acc;
+                }, {});
+            
+            Plotly.newPlot('graph-taches-departement', [{
+                x: Object.keys(departementsSorted),
+                y: Object.values(departementsSorted),
+                type: 'bar',
+                name: 'Nombre de tâches',
+                marker: {
+                    color: 'rgba(219, 64, 82, 0.7)'
+                }
+            }], {
+                title: annee ? `Nombre de tâches par département en ${annee}` : 'Nombre de tâches par département (toutes années)',
+                xaxis: { title: 'Département' },
+                yaxis: { title: 'Nombre de tâches' }
+            });
+        }
+
+        // Graphique de la répartition des tâches par statut et tranche d'âge
+        function afficherTachesParAgeEtEtat(dataTaches, dataEmployes) {
+            if (dataTaches.length === 0 || dataEmployes.length === 0) {
+                document.getElementById('graph-taches-age').innerHTML = "<p>Données insuffisantes pour afficher ce graphique</p>";
+                return;
+            }
+            
+            const tranches = tachesParAgeEtEtat(dataTaches, dataEmployes);
+            
+            // Préparer des traces pour chaque tranche d'âge
+            const traces = [];
+            const etats = new Set();
+            
+            // Collecter tous les états possibles
+            Object.values(tranches).forEach(trancheData => {
+                Object.keys(trancheData).forEach(etat => etats.add(etat));
+            });
+            
+            // Créer une trace par état
+            etats.forEach(etat => {
+                const trace = {
+                    x: Object.keys(tranches),
+                    y: Object.keys(tranches).map(tranche => tranches[tranche][etat] || 0),
+                    type: 'bar',
+                    name: etat
+                };
+                traces.push(trace);
+            });
+            
+            Plotly.newPlot('graph-taches-age', traces, {
+                title: 'Répartition des tâches par statut et tranche d\'âge',
+                xaxis: { title: 'Tranche d\'âge' },
+                yaxis: { title: 'Nombre de tâches' },
+                barmode: 'stack'
+            });
+        }
+
+        // Graphique du nombre de tâches par année et département
+        function afficherTachesParAnneeEtDepartement(dataTaches, dataEmployes) {
+            if (dataTaches.length === 0 || dataEmployes.length === 0) {
+                document.getElementById('graph-taches-annee').innerHTML = "<p>Données insuffisantes pour afficher ce graphique</p>";
+                return;
+            }
+            
+            const donnees = tachesParAnneeEtDepartement(dataTaches, dataEmployes);
+            
+            // Collecter tous les départements
+            const departements = new Set();
+            Object.values(donnees).forEach(anneeData => {
+                Object.keys(anneeData).forEach(dep => departements.add(dep));
+            });
+            
+            // Créer une trace par département
+            const traces = [];
+            departements.forEach(departement => {
+                const annees = Object.keys(donnees).sort();
+                const trace = {
+                    x: annees,
+                    y: annees.map(annee => (donnees[annee] && donnees[annee][departement]) || 0),
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    name: departement
+                };
+                traces.push(trace);
+            });
+            
+            Plotly.newPlot('graph-taches-annee', traces, {
+                title: 'Évolution du nombre de tâches par année et département',
+                xaxis: { title: 'Année' },
+                yaxis: { title: 'Nombre de tâches' }
+            });
+        }
+
+        // Initialiser le tableau de bord avec les données chargées
+        function initialiserTableauDeBord() {
+            if (dataTaches.length === 0 || dataEmployes.length === 0) {
+                statusElement.textContent = "Veuillez charger les deux fichiers pour visualiser les données";
+                return;
+            }
+            
+            // Extraire les années disponibles dans les données
+            const annees = [...new Set(
+                dataTaches
+                    .filter(tache => tache.date_debut_obj)
+                    .map(tache => tache.date_debut_obj.getFullYear())
+            )];
+            annees.sort();
+            
+            // Remplir le sélecteur d'années
+            const select = document.getElementById('select-annee');
+            select.innerHTML = '<option value="">Toutes</option>';
+            
+            annees.forEach(annee => {
+                const option = document.createElement('option');
+                option.value = annee;
+                option.textContent = annee;
+                select.appendChild(option);
+            });
+
+            // Ajouter l'événement de changement d'année
+            select.addEventListener('change', mettreAJourDashboard);
+            
+            // Affichage initial
+            mettreAJourDashboard();
+            
+            statusElement.textContent = `Tableau de bord initialisé avec ${dataEmployes.length} employés et ${dataTaches.length} tâches.`;
+        }
+
+        // Mettre à jour les graphiques selon l'année sélectionnée
+        function mettreAJourDashboard() {
+            const annee = document.getElementById('select-annee').value;
+            
+            afficherAgeParDepartement(dataEmployes);
+            afficherTachesParDepartement(dataTaches, dataEmployes, annee);
+            afficherTachesParAgeEtEtat(dataTaches, dataEmployes);
+            afficherTachesParAnneeEtDepartement(dataTaches, dataEmployes);
+        }
+    </script>
 </body>
 </html>
